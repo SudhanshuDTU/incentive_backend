@@ -6,10 +6,6 @@ dotenv.config();
 const TEAM_API = 'https://gg-nodejs.onrender.com/api/teams/';
 const CLUSTER_API = 'https://gg-nodejs.onrender.com/api/clusters/';
 const NEW_RELIC_API = 'https://api.newrelic.com/graphql';
-const AUTH_HEADERS = {
-  'Content-Type': 'application/json',
-  'Authorization': `Bearer ${process.env.AUTH_TOKEN}`
-};
 
 const NEW_RELIC_HEADERS = {
   'Content-Type': 'application/json',
@@ -17,7 +13,11 @@ const NEW_RELIC_HEADERS = {
 };
 
 
-export const runIncentiveJob =  async () => {
+export const runIncentiveJob =  async (authToken) => {
+  const AUTH_HEADERS = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${authToken}`
+  };
   try {
     console.log('Starting weekly incentive job...');
 
@@ -51,6 +51,12 @@ export const runIncentiveJob =  async () => {
         clusterUsers[name].push(user.user_id);
       });
     });
+
+    // count machine in each cluster
+    const machineCountMap = {};
+    clusters.forEach(c=>{
+      machineCountMap[c.cluster_name] = c.machines?.length || 0;
+    })
 
     // 5. Fetch Sales data from New Relic
     const salesQuery = {
@@ -108,14 +114,16 @@ export const runIncentiveJob =  async () => {
       const userIds = clusterUsers[clusterName] || [];
     
       if (userIds.length === 0) continue; // skip unlinked clusters
-
+      const machineCount = machineCountMap[clusterName] || 1;
+      const salesPerMachine = sales / machineCount;
       await IncentiveModel.create({
         userId: userIds, 
         sales,
         availability_rate,
         clusterId: reverseClusterMap[clusterName],
         from_date: new Date(new Date().setDate(new Date().getDate() - 7)),
-        to_date: new Date()
+        to_date: new Date(),
+        salesPerMachine
       });
     }
 
@@ -125,9 +133,11 @@ export const runIncentiveJob =  async () => {
   }
 };
 // Cron Job - Every Sunday at 1:00 PM
-cron.schedule('0 13 * * 0', async () => {
-    console.log('Starting weekly incentive job from cron...');
-    await runIncentiveJob();
+export const scheduleIncentiveJob = (token) => {
+  cron.schedule('0 13 * * 0', async () => {
+    console.log('🕐 Running incentive job via cron...');
+    await runIncentiveJob(token);
   });
+};
 
   
